@@ -1,0 +1,246 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+//////////////////////////////////////////////////////
+// ENUMS
+//////////////////////////////////////////////////////
+
+enum Estado {
+  ACTIVO
+  INACTIVO
+}
+
+enum Rol {
+  SUPERADMIN
+  ADMIN
+  SUPERVISOR
+  TECNICO
+}
+
+enum TipoEstacion {
+  POZO
+  PLANTA
+  ESTANQUE
+  SALA_BOMBAS
+}
+
+enum TipoDispositivo {
+  GATEWAY
+  PLC
+  SENSOR
+}
+
+enum EstadoDispositivo {
+  CONECTADO
+  DESCONECTADO
+  ERROR
+}
+
+enum SeveridadAlarma {
+  BAJA
+  MEDIA
+  ALTA
+  CRITICA
+}
+
+enum EstadoAlarma {
+  ACTIVA
+  RESUELTA
+}
+
+enum TipoComando {
+  START_BOMBA
+  STOP_BOMBA
+  RESET_ALARMA
+}
+
+enum EstadoComando {
+  PENDIENTE
+  ENVIADO
+  EJECUTADO
+  ERROR
+}
+
+enum Plataforma {
+  ANDROID
+}
+
+enum TipoPlan {
+  BASICO
+  PROFESIONAL
+  EMPRESARIAL
+}
+
+enum TipoHistorialTenant {
+  ACTIVACION
+  DESACTIVACION
+  CAMBIO_PLAN
+  CAMBIO_ADMIN
+}
+
+//////////////////////////////////////////////////////
+// MODELOS
+//////////////////////////////////////////////////////
+
+model Tenant {
+  id        Int      @id @default(autoincrement())
+  planId    Int?
+  nombre    String   @unique
+  estado    Estado   @default(ACTIVO)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan        Plan?             @relation(fields: [planId], references: [id])
+  usuarios    Usuario[]
+  recintos    Recinto[]
+  historial   HistorialTenant[]
+  telemetrias Telemetria[]
+}
+
+model Usuario {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int?
+  nombre       String
+  email        String   @unique
+  passwordHash String
+  rol          Rol
+  estado       Estado   @default(ACTIVO)
+  isPrimary    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant            Tenant?            @relation(fields: [tenantId], references: [id])
+  comandos          Comando[]
+  dispositivosMovil DispositivoMovil[]
+  historialTenants  HistorialTenant[]
+}
+
+model Recinto {
+  id          Int      @id @default(autoincrement())
+  tenantId    Int
+  nombre      String
+  ubicacion   String?
+  descripcion String?
+  estado      Estado   @default(ACTIVO)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  estaciones Estacion[]
+}
+
+model Estacion {
+  id          Int          @id @default(autoincrement())
+  recintoId   Int
+  nombre      String
+  tipo        TipoEstacion
+  descripcion String?
+  estado      Estado       @default(ACTIVO)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  recinto      Recinto       @relation(fields: [recintoId], references: [id])
+  dispositivos Dispositivo[]
+  alarmas      Alarma[]
+}
+
+model Dispositivo {
+  id             Int               @id @default(autoincrement())
+  estacionId     Int
+  azureDeviceId  String            @unique
+  nombre         String
+  tipo           TipoDispositivo
+  estado         EstadoDispositivo @default(DESCONECTADO)
+  ultimaConexion DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  estacion Estacion  @relation(fields: [estacionId], references: [id])
+  comandos Comando[]
+}
+
+model Telemetria {
+  id            Int      @id @default(autoincrement())
+  tenantId      Int
+  nivelEstanque Float
+  bombaActiva   Boolean
+  fechaLectura  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+}
+
+model Alarma {
+  id          Int             @id @default(autoincrement())
+  estacionId  Int
+  tipo        String
+  severidad   SeveridadAlarma
+  mensaje     String
+  estado      EstadoAlarma    @default(ACTIVA)
+  fechaInicio DateTime        @default(now())
+  fechaCierre DateTime?
+
+  estacion Estacion @relation(fields: [estacionId], references: [id])
+}
+
+model Comando {
+  id             Int           @id @default(autoincrement())
+  dispositivoId  Int
+  usuarioId      Int
+  tipo           TipoComando
+  estado         EstadoComando @default(PENDIENTE)
+  payload        Json?
+  respuesta      String?
+  fechaSolicitud DateTime      @default(now())
+  fechaRespuesta DateTime?
+
+  dispositivo Dispositivo @relation(fields: [dispositivoId], references: [id])
+  usuario     Usuario     @relation(fields: [usuarioId], references: [id])
+}
+
+model DispositivoMovil {
+  id         Int        @id @default(autoincrement())
+  usuarioId  Int
+  token      String
+  plataforma Plataforma
+  activo     Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+}
+
+model Plan {
+  id          Int      @id @default(autoincrement())
+  nombre      TipoPlan @unique
+  descripcion String?
+  estado      Estado   @default(ACTIVO)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenants        Tenant[]
+  historialAntes HistorialTenant[] @relation("PlanAntes")
+  historialNuevo HistorialTenant[] @relation("PlanNuevo")
+}
+
+model HistorialTenant {
+  id          Int                 @id @default(autoincrement())
+  tenantId    Int
+  usuarioId   Int?
+  tipo        TipoHistorialTenant
+  estadoAntes Estado?
+  estadoNuevo Estado?
+  planAntesId Int?
+  planNuevoId Int?
+  nota        String
+  createdAt   DateTime            @default(now())
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  usuario   Usuario? @relation(fields: [usuarioId], references: [id])
+  planAntes Plan?    @relation("PlanAntes", fields: [planAntesId], references: [id])
+  planNuevo Plan?    @relation("PlanNuevo", fields: [planNuevoId], references: [id])
+}

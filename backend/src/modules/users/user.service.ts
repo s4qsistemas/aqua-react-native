@@ -12,20 +12,57 @@ export const crearUsuario = async (data: any) => {
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(DEFAULT_TEMP_PASSWORD, salt);
 
-    const nuevoUsuario = await prisma.usuario.create({
-        data: {
-            tenantId: Number(tenantId),
-            nombre,
-            email,
-            passwordHash,
-            rol: rol,
-            estado: 'ACTIVO',
-        },
-        select: { id: true, nombre: true, email: true, rol: true, tenantId: true }
-    });
+    return prisma.$transaction(async (tx) => {
+        let isPrimary = false;
+        let adminActual = null;
 
-    // Retornamos el usuario junto con la clave genérica para la alerta del frontend
-    return { ...nuevoUsuario, tempPassword: DEFAULT_TEMP_PASSWORD };
+        if (rol === 'ADMIN' && tenantId) {
+            isPrimary = true;
+            // Buscar si ya había un admin principal
+            adminActual = await tx.usuario.findFirst({
+                where: { tenantId: Number(tenantId), isPrimary: true }
+            });
+
+            // Quitar el rol principal a los demás
+            if (adminActual) {
+                await tx.usuario.updateMany({
+                    where: { tenantId: Number(tenantId), isPrimary: true },
+                    data: { isPrimary: false }
+                });
+            }
+        }
+
+        const nuevoUsuario = await tx.usuario.create({
+            data: {
+                tenantId: tenantId ? Number(tenantId) : null,
+                nombre,
+                email,
+                passwordHash,
+                rol: rol,
+                estado: 'ACTIVO',
+                isPrimary
+            },
+            select: { id: true, nombre: true, email: true, rol: true, tenantId: true }
+        });
+
+        // Registrar en historial si es un nuevo admin principal
+        if (isPrimary && tenantId) {
+            const nota = adminActual 
+                ? `Cambio de administrador principal: ${adminActual.nombre} -> ${nuevoUsuario.nombre}`
+                : `Primer administrador principal registrado: ${nuevoUsuario.nombre}`;
+
+            await tx.historialTenant.create({
+                data: {
+                    tenantId: Number(tenantId),
+                    tipo: "CAMBIO_ADMIN",
+                    nota
+                }
+            });
+        }
+
+        // Retornamos el usuario junto con la clave genérica
+        return { ...nuevoUsuario, tempPassword: DEFAULT_TEMP_PASSWORD };
+    });
 };
 
 export const actualizarUsuario = async (id: number, data: any) => {

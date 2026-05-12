@@ -1,6 +1,7 @@
 #Aqua (Web and Mobile)
 
 docker exec -it aqua-postgres psql -U postgres -d aqua_db
+docker exec -it aqua-postgres psql -U postgres -d aqua_db
 
 aqua_db=# \d
 aqua_db=# \q

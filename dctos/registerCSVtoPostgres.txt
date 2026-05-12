@@ -1,0 +1,18 @@
+Microsoft Windows [Versión 10.0.26200.8246]
+(c) Microsoft Corporation. Todos los derechos reservados.
+
+C:\dev\aqua>cd backend
+
+C:\dev\aqua\backend>docker cp telemetria_poblamiento.csv aqua-postgres:/telemetria_poblamiento.csv
+Successfully copied 121kB to aqua-postgres:/telemetria_poblamiento.csv
+
+C:\dev\aqua\backend>docker exec -it aqua-postgres psql -U postgres -d aqua_db -c "\copy \"Telemetria\"(\"tenantId\", \"siteCode\", \"gatewayCode\", \"plcCode\", secuencia, \"nivelEstanquePorcentaje\", \"nivelEstanqueMetros\", \"volumenEstanqueLitros\", \"bomba1Activa\", \"bomba2Activa\", \"booster1Activo\", \"booster2Activo\", \"valvulaEntradaAbierta\", \"valvulaSalidaAbierta\", \"modoOperacion\", \"controlRemotoHabilitado\", \"plcEnLinea\", \"nubeConectada\", \"tipoWan\", \"latenciaMs\", \"fechaLectura\") FROM '/telemetria_poblamiento.csv' DELIMITER ',' CSV HEADER;"
+COPY 864
+
+C:\dev\aqua\backend>
+
+# Copia el CSV dentro del contenedor Docker
+docker cp telemetria_poblamiento.csv aqua-postgres:/telemetria_poblamiento.csv
+
+# Ejecuta el comando nativo de PostgreSQL para copiar los datos a la tabla
+docker exec -it aqua-postgres psql -U postgres -d aqua_db -c "\copy \"Telemetria\"(\"tenantId\", \"siteCode\", \"gatewayCode\", \"plcCode\", secuencia, \"nivelEstanquePorcentaje\", \"nivelEstanqueMetros\", \"volumenEstanqueLitros\", \"bomba1Activa\", \"bomba2Activa\", \"booster1Activo\", \"booster2Activo\", \"valvulaEntradaAbierta\", \"valvulaSalidaAbierta\", \"modoOperacion\", \"controlRemotoHabilitado\", \"plcEnLinea\", \"nubeConectada\", \"tipoWan\", \"latenciaMs\", \"fechaLectura\") FROM '/telemetria_poblamiento.csv' DELIMITER ',' CSV HEADER;"

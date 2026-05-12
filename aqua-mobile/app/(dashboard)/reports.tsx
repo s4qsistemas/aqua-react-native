@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { io } from 'socket.io-client';
 import { useAuth } from '../../src/context/AuthContext';
 import { apiFetch } from '../../src/services/api'; // Importación necesaria para el histórico
+import { LineChart } from 'react-native-chart-kit';
 
 export default function ReportsScreen() {
     const { user } = useAuth();
@@ -69,6 +70,17 @@ export default function ReportsScreen() {
         return diffMins === 0 ? 'Sincronizado ahora' : `Sincronizado hace ${diffMins} min`;
     };
 
+    const chartData = {
+        labels: historial.length > 0 ? historial.map(h => "") : [""], // Ocultamos los labels del eje X para no saturar
+        datasets: [
+            {
+                data: historial.length > 0 ? historial.map(h => h.nivelEstanquePorcentaje || 0) : [0],
+                color: (opacity = 1) => `rgba(56, 189, 248, ${opacity})`,
+                strokeWidth: 2
+            }
+        ]
+    };
+
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={styles.header}>
@@ -111,14 +123,35 @@ export default function ReportsScreen() {
 
             {/* Sección de Gráfico */}
             <Text style={styles.sectionTitle}>Nivel Histórico (24h)</Text>
-            <View style={styles.chartPlaceholder}>
+            <View style={historial.length > 0 && !cargandoHistorial ? styles.chartContainer : styles.chartPlaceholder}>
                 {cargandoHistorial ? (
                     <ActivityIndicator color="#38bdf8" size="large" />
+                ) : historial.length > 0 ? (
+                    <LineChart
+                        data={chartData}
+                        width={Dimensions.get("window").width - 40}
+                        height={220}
+                        yAxisSuffix="%"
+                        withVerticalLabels={false}
+                        withInnerLines={false}
+                        withOuterLines={false}
+                        chartConfig={{
+                            backgroundColor: "#1e293b",
+                            backgroundGradientFrom: "#1e293b",
+                            backgroundGradientTo: "#1e293b",
+                            decimalPlaces: 0,
+                            color: (opacity = 1) => `rgba(56, 189, 248, ${opacity})`,
+                            labelColor: (opacity = 1) => `rgba(148, 163, 184, ${opacity})`,
+                            propsForDots: { r: "0" } // Ocultar los puntos para ver la línea continua
+                        }}
+                        bezier
+                        style={{ marginVertical: 8, borderRadius: 16 }}
+                    />
                 ) : (
                     <>
                         <Ionicons name="stats-chart" size={48} color="#334155" />
                         <Text style={{ color: '#64748b', marginTop: 10 }}>
-                            {historial.length} puntos listos para graficar
+                            Sin datos para graficar
                         </Text>
                     </>
                 )}
@@ -147,5 +180,6 @@ const styles = StyleSheet.create({
     statValue: { color: 'white', fontSize: 24, fontWeight: 'bold', marginTop: 8 },
     statLabel: { color: '#94a3b8', fontSize: 12, marginTop: 2 },
     sectionTitle: { color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 16 },
-    chartPlaceholder: { height: 200, backgroundColor: '#1e293b', borderRadius: 24, borderWidth: 2, borderColor: '#334155', borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center' }
+    chartPlaceholder: { height: 200, backgroundColor: '#1e293b', borderRadius: 24, borderWidth: 2, borderColor: '#334155', borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center' },
+    chartContainer: { backgroundColor: '#1e293b', borderRadius: 24, borderWidth: 1, borderColor: '#334155', paddingVertical: 10, alignItems: 'center' }
 });

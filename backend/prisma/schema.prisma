@@ -165,12 +165,39 @@ model Dispositivo {
 }
 
 model Telemetria {
-  id            Int      @id @default(autoincrement())
-  tenantId      Int
-  nivelEstanque Float
-  bombaActiva   Boolean
-  fechaLectura  DateTime @default(now())
+  id       Int @id @default(autoincrement())
+  tenantId Int
 
+  // Identificadores del Origen
+  siteCode    String?
+  gatewayCode String?
+  plcCode     String?
+  secuencia   Int?
+
+  // Variables de Proceso (Process)
+  nivelEstanquePorcentaje Float
+  nivelEstanqueMetros     Float?
+  volumenEstanqueLitros   Float?
+  bomba1Activa            Boolean @default(false)
+  bomba2Activa            Boolean @default(false)
+  booster1Activo          Boolean @default(false)
+  booster2Activo          Boolean @default(false)
+  valvulaEntradaAbierta   Boolean @default(false)
+  valvulaSalidaAbierta    Boolean @default(false)
+  modoOperacion           String  @default("AUTO")
+  controlRemotoHabilitado Boolean @default(true)
+
+  // Variables de Comunicaciones
+  plcEnLinea    Boolean @default(true)
+  nubeConectada Boolean @default(true)
+  tipoWan       String?
+  latenciaMs    Int?
+
+  // Tiempos
+  fechaLectura DateTime
+  createdAt    DateTime @default(now())
+
+  // Relaciones
   tenant Tenant @relation(fields: [tenantId], references: [id])
 }
 

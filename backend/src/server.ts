@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import app from './app';
-import { iniciarEscuchaIoT } from './modules/iot/iot.service';
+import { iniciarServicioIoT } from './modules/iot/iot.service';
 // 1. Crear el servidor HTTP envolviendo la aplicación Express ya configurada
 const httpServer = createServer(app);
 
@@ -18,6 +18,12 @@ export const io = new Server(httpServer, {
 io.on("connection", (socket) => {
     console.log(`🔌 Nuevo cliente conectado: ${socket.id}`);
 
+    socket.on("unirse_tenant", (tenantId) => {
+        const room = `tenant_${tenantId}`;
+        socket.join(room);
+        console.log(`🔌 Cliente ${socket.id} se unió a la sala ${room}`);
+    });
+
     socket.on("disconnect", () => {
         console.log(`🔌 Cliente desconectado: ${socket.id}`);
     });
@@ -28,5 +34,5 @@ const PORT = process.env.PORT || 3000;
 // 4. Iniciar el servidor e IoT listener
 httpServer.listen(PORT, () => {
     console.log(`Servidor corriendo en puerto ${PORT}`);
-    iniciarEscuchaIoT(io);
+    iniciarServicioIoT(io);
 });

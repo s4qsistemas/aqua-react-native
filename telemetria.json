@@ -1,0 +1,28 @@
+{
+    "messageType": "telemetry",
+    "tenantCode": "APR_SAN_ISIDRO",
+    "siteCode": "RECINTO_01",
+    "gatewayCode": "GW-01",
+    "plcCode": "PLC-01",
+    "timestampUtc": "2026-03-28T15:10:00Z",
+    "sequence": 20015,
+    "process": {
+        "tankLevelPercent": 68.5,
+        "tankLevelMeters": 3.42,
+        "tankVolumeLiters": 342500,
+        "pump1Running": true,
+        "pump2Running": false,
+        "booster1Running": false,
+        "booster2Running": true,
+        "inletValveOpen": true,
+        "outletValveOpen": true,
+        "mode": "AUTO",
+        "remoteControlEnabled": true
+    },
+    "communications": {
+        "plcOnline": true,
+        "cloudConnected": true,
+        "wanType": "STARLINK",
+        "latencyMs": 74
+    }
+}

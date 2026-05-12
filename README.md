@@ -1,4 +1,4 @@
-"aqua-react-native"
+#Aqua (Web and Mobile)
 
 docker exec -it aqua-postgres psql -U postgres -d aqua_db
 

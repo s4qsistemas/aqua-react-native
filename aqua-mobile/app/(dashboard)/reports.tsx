@@ -1,8 +1,44 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { io } from 'socket.io-client';
+import { useAuth } from '../../src/context/AuthContext';
 
 export default function ReportsScreen() {
+    const { user } = useAuth();
+    const [telemetria, setTelemetria] = useState<any>(null);
+    const [lastSync, setLastSync] = useState<Date | null>(null);
+
+    useEffect(() => {
+        const socketUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.replace('/api', '') || 'http://192.168.1.16:3000';
+        const socket = io(socketUrl);
+
+        socket.on('connect', () => {
+            console.log('📡 WebSocket conectado');
+            if (user?.tenantId) {
+                socket.emit('unirse_tenant', user.tenantId);
+            }
+        });
+
+        socket.on('actualizacion_sensores', (data) => {
+            console.log('💧 Dato recibido en App:', data);
+            setTelemetria(data);
+            setLastSync(new Date());
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [user?.tenantId]);
+
+    const getSyncText = () => {
+        if (!lastSync) return 'Esperando conexión...';
+        const diffMs = new Date().getTime() - lastSync.getTime();
+        const diffMins = Math.round(diffMs / 60000);
+        if (diffMins === 0) return 'hace unos segundos';
+        return `hace ${diffMins} min`;
+    };
+
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={styles.summaryCard}>
@@ -35,12 +71,16 @@ export default function ReportsScreen() {
 
             <View style={styles.infoCard}>
                 <View style={styles.infoRow}>
-                    <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-                    <Text style={styles.infoText}>Sistema operando con normalidad</Text>
+                    <Ionicons name={telemetria ? "checkmark-circle" : "sync"} size={20} color={telemetria ? "#10b981" : "#f59e0b"} />
+                    <Text style={styles.infoText}>
+                        {telemetria 
+                            ? `Nivel actual: ${telemetria.nivelEstanque}% | Bomba: ${telemetria.bombaActiva ? 'ON' : 'OFF'}`
+                            : 'Buscando datos del sensor...'}
+                    </Text>
                 </View>
                 <View style={[styles.infoRow, { marginTop: 12 }]}>
                     <Ionicons name="time" size={20} color="#38bdf8" />
-                    <Text style={styles.infoText}>Última sincronización: hace 5 min</Text>
+                    <Text style={styles.infoText}>Última sincronización: {getSyncText()}</Text>
                 </View>
             </View>
         </ScrollView>

@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ⚠️ REEMPLAZA LA IP POR LA DE TU PC EN TU RED WIFI LOCAL (ej. 192.168.1.50)
 const getApiBaseUrl = () => {
-    const defaultIP = "http://192.168.1.8:3000/api";
+    const defaultIP = "http://192.168.1.16:3000/api";
     const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
 
     // Si estamos en la WEB y el hostname es localhost, usamos localhost

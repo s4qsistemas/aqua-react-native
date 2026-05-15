@@ -1,38 +1,51 @@
+// c:\dev\aqua\backend\src\modules\telemetria\telemetria.controller.ts
+
 import { Request, Response } from 'express';
 import prisma from '../../lib/prisma';
 
 export const getHistorialTelemetria = async (req: Request, res: Response): Promise<void> => {
     try {
         const { tenantId } = req.params;
-        const horas = Number(req.query.horas) || 24; // Por defecto trae 24 horas
+        const horas = Number(req.query.horas) || 24;
 
-        // Calculamos la fecha límite hacia atrás
         const fechaInicio = new Date();
         fechaInicio.setHours(fechaInicio.getHours() - horas);
 
-        const historial = await prisma.telemetria.findMany({
+        // 1. Traemos todos los registros del periodo sin filtrar por una sola métrica
+        const registros = await prisma.registroScada.findMany({
             where: {
                 tenantId: Number(tenantId),
-                fechaLectura: {
-                    gte: fechaInicio // gte = Greater Than or Equal (Desde hace 24 hrs hasta hoy)
-                }
+                capturedAt: { gte: fechaInicio }
             },
-            orderBy: {
-                fechaLectura: 'asc' // De más antiguo a más nuevo, vital para el eje X del gráfico
-            },
-            // Optimizamos el payload: Solo enviamos a la app lo que sirve para graficar
-            select: {
-                id: true,
-                nivelEstanquePorcentaje: true,
-                volumenEstanqueLitros: true,
-                bomba1Activa: true,
-                fechaLectura: true
-            }
+            orderBy: { capturedAt: 'asc' }
         });
 
-        res.status(200).json(historial);
+        // 2. Agrupamos por estampa de tiempo para reconstruir el objeto que la App espera
+        const historialMap: Record<string, any> = {};
+
+        registros.forEach(reg => {
+            const timestamp = reg.capturedAt.toISOString();
+
+            if (!historialMap[timestamp]) {
+                historialMap[timestamp] = {
+                    id: reg.id,
+                    fechaLectura: reg.capturedAt,
+                    nivelEstanquePorcentaje: 0,
+                    volumenEstanqueLitros: 0,
+                    bomba1Activa: false
+                };
+            }
+
+            // Mapeamos cada métrica a su campo correspondiente en la App
+            if (reg.metric === 'level') historialMap[timestamp].nivelEstanquePorcentaje = reg.valueFloat;
+            if (reg.metric === 'volume') historialMap[timestamp].volumenEstanqueLitros = reg.valueFloat;
+            if (reg.metric === 'status') historialMap[timestamp].bomba1Activa = reg.valueFloat === 1;
+        });
+
+        // Convertimos el mapa de nuevo a un array para la respuesta
+        res.status(200).json(Object.values(historialMap));
     } catch (error) {
         console.error("❌ Error obteniendo historial de telemetría:", error);
-        res.status(500).json({ error: "Error interno del servidor al obtener históricos" });
+        res.status(500).json({ error: "Error interno del servidor" });
     }
 };

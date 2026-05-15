@@ -83,8 +83,20 @@ enum TipoHistorialTenant {
   CAMBIO_ADMIN
 }
 
+enum TipoSensorScada {
+  NIVEL
+  CAUDAL
+  PRESION
+  CLORO
+  TURBIDEZ
+  ENERGIA
+  ESTADO
+  ALARMA
+  OTRO
+}
+
 //////////////////////////////////////////////////////
-// MODELOS
+// MODELOS BASE APP / SAAS
 //////////////////////////////////////////////////////
 
 model Tenant {
@@ -95,11 +107,19 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  plan        Plan?             @relation(fields: [planId], references: [id])
-  usuarios    Usuario[]
-  recintos    Recinto[]
-  historial   HistorialTenant[]
-  telemetrias Telemetria[]
+  plan      Plan?             @relation(fields: [planId], references: [id])
+  usuarios  Usuario[]
+  recintos  Recinto[]
+  historial HistorialTenant[]
+
+  // Capa SCADA / Telemetría
+  sensores        SensorScada[]
+  registrosScada  RegistroScada[]
+  estadosActuales EstadoActualScada[]
+  alarmas         Alarma[]
+  comandos        Comando[]
+
+  @@index([estado])
 }
 
 model Usuario {
@@ -118,11 +138,16 @@ model Usuario {
   comandos          Comando[]
   dispositivosMovil DispositivoMovil[]
   historialTenants  HistorialTenant[]
+
+  @@index([tenantId])
+  @@index([rol])
+  @@index([estado])
 }
 
 model Recinto {
   id          Int      @id @default(autoincrement())
   tenantId    Int
+  codigo      String
   nombre      String
   ubicacion   String?
   descripcion String?
@@ -130,13 +155,22 @@ model Recinto {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id])
-  estaciones Estacion[]
+  tenant          Tenant              @relation(fields: [tenantId], references: [id])
+  estaciones      Estacion[]
+  sensores        SensorScada[]
+  registrosScada  RegistroScada[]
+  estadosActuales EstadoActualScada[]
+  alarmas         Alarma[]
+  comandos        Comando[]
+
+  @@unique([tenantId, codigo])
+  @@index([tenantId, estado])
 }
 
 model Estacion {
   id          Int          @id @default(autoincrement())
   recintoId   Int
+  codigo      String
   nombre      String
   tipo        TipoEstacion
   descripcion String?
@@ -144,15 +178,24 @@ model Estacion {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  recinto      Recinto       @relation(fields: [recintoId], references: [id])
-  dispositivos Dispositivo[]
-  alarmas      Alarma[]
+  recinto         Recinto             @relation(fields: [recintoId], references: [id])
+  dispositivos    Dispositivo[]
+  sensores        SensorScada[]
+  registrosScada  RegistroScada[]
+  estadosActuales EstadoActualScada[]
+  alarmas         Alarma[]
+  comandos        Comando[]
+
+  @@unique([recintoId, codigo])
+  @@index([recintoId, estado])
+  @@index([tipo])
 }
 
 model Dispositivo {
   id             Int               @id @default(autoincrement())
   estacionId     Int
-  azureDeviceId  String            @unique
+  codigo         String
+  azureDeviceId  String?           @unique
   nombre         String
   tipo           TipoDispositivo
   estado         EstadoDispositivo @default(DESCONECTADO)
@@ -160,50 +203,166 @@ model Dispositivo {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
-  estacion Estacion  @relation(fields: [estacionId], references: [id])
-  comandos Comando[]
+  estacion        Estacion            @relation(fields: [estacionId], references: [id])
+  sensores        SensorScada[]
+  registrosScada  RegistroScada[]
+  estadosActuales EstadoActualScada[]
+  alarmas         Alarma[]
+  comandos        Comando[]
+
+  @@unique([estacionId, codigo])
+  @@index([estacionId, estado])
+  @@index([tipo])
 }
 
-model Telemetria {
-  id       Int @id @default(autoincrement())
-  tenantId Int
+//////////////////////////////////////////////////////
+// MODELOS SCADA / TELEMETRÍA
+//////////////////////////////////////////////////////
 
-  // Identificadores del Origen
+model SensorScada {
+  id            Int             @id @default(autoincrement())
+  tenantId      Int
+  recintoId     Int
+  estacionId    Int
+  dispositivoId Int
+  codigo        String
+  nombre        String
+  tipo          TipoSensorScada @default(OTRO)
+  metric        String
+  unit          String?
+  descripcion   String?
+  estado        Estado          @default(ACTIVO)
+
+  // Umbrales opcionales para pintar OK / WARNING / CRÍTICO desde backend
+  warningMin  Float?
+  warningMax  Float?
+  criticalMin Float?
+  criticalMax Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant          Tenant              @relation(fields: [tenantId], references: [id])
+  recinto         Recinto             @relation(fields: [recintoId], references: [id])
+  estacion        Estacion            @relation(fields: [estacionId], references: [id])
+  dispositivo     Dispositivo         @relation(fields: [dispositivoId], references: [id])
+  registrosScada  RegistroScada[]
+  estadosActuales EstadoActualScada[]
+  alarmas         Alarma[]
+
+  @@unique([dispositivoId, codigo])
+  @@index([tenantId, recintoId, estacionId])
+  @@index([dispositivoId, metric])
+  @@index([estado])
+}
+
+model RegistroScada {
+  id String @id @default(uuid())
+
+  // ID externo del mensaje recibido desde gateway/API/IoT.
+  // Permite evitar duplicados si el mismo paquete se reintenta.
+  externalMessageId String? @unique
+
+  // Claves foráneas principales para segmentación SaaS + SCADA
+  tenantId      Int
+  recintoId     Int?
+  estacionId    Int?
+  dispositivoId Int?
+  sensorId      Int?
+
+  // Identificadores originales del JSON recibido
+  messageType String  @default("telemetry")
+  tenantCode  String
   siteCode    String?
+  stationCode String?
+  deviceCode  String?
   gatewayCode String?
   plcCode     String?
-  secuencia   Int?
+  sensorCode  String?
 
-  // Variables de Proceso (Process)
-  nivelEstanquePorcentaje Float
-  nivelEstanqueMetros     Float?
-  volumenEstanqueLitros   Float?
-  bomba1Activa            Boolean @default(false)
-  bomba2Activa            Boolean @default(false)
-  booster1Activo          Boolean @default(false)
-  booster2Activo          Boolean @default(false)
-  valvulaEntradaAbierta   Boolean @default(false)
-  valvulaSalidaAbierta    Boolean @default(false)
-  modoOperacion           String  @default("AUTO")
-  controlRemotoHabilitado Boolean @default(true)
+  // Dato normalizado para consulta rápida
+  metric       String
+  unit         String?
+  valueFloat   Float?
+  valueInt     Int?
+  valueBoolean Boolean?
+  valueText    String?
+  valueJson    Json?
 
-  // Variables de Comunicaciones
-  plcEnLinea    Boolean @default(true)
-  nubeConectada Boolean @default(true)
-  tipoWan       String?
-  latenciaMs    Int?
+  // Datos operacionales complementarios
+  quality  String?
+  status   String?
+  sequence BigInt?
 
-  // Tiempos
-  fechaLectura DateTime
-  createdAt    DateTime @default(now())
+  // Fechas
+  capturedAt DateTime
+  ingestedAt DateTime @default(now())
 
-  // Relaciones
-  tenant Tenant @relation(fields: [tenantId], references: [id])
+  // JSON completo original. Sirve para auditoría, reproceso y compatibilidad futura.
+  rawPayload Json
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  recinto     Recinto?     @relation(fields: [recintoId], references: [id])
+  estacion    Estacion?    @relation(fields: [estacionId], references: [id])
+  dispositivo Dispositivo? @relation(fields: [dispositivoId], references: [id])
+  sensor      SensorScada? @relation(fields: [sensorId], references: [id])
+  alarmas     Alarma[]
+
+  @@index([tenantId, capturedAt])
+  @@index([tenantId, recintoId, capturedAt])
+  @@index([tenantId, recintoId, estacionId, capturedAt])
+  @@index([dispositivoId, metric, capturedAt])
+  @@index([sensorId, capturedAt])
+  @@index([tenantCode, siteCode, deviceCode, capturedAt])
 }
 
+model EstadoActualScada {
+  id            Int @id @default(autoincrement())
+  tenantId      Int
+  recintoId     Int
+  estacionId    Int
+  dispositivoId Int
+  sensorId      Int
+
+  metric       String
+  unit         String?
+  valueFloat   Float?
+  valueInt     Int?
+  valueBoolean Boolean?
+  valueText    String?
+  valueJson    Json?
+  status       String   @default("OK")
+  quality      String?
+
+  capturedAt DateTime
+  updatedAt  DateTime @updatedAt
+  rawPayload Json?
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
+  recinto     Recinto     @relation(fields: [recintoId], references: [id])
+  estacion    Estacion    @relation(fields: [estacionId], references: [id])
+  dispositivo Dispositivo @relation(fields: [dispositivoId], references: [id])
+  sensor      SensorScada @relation(fields: [sensorId], references: [id])
+
+  @@unique([sensorId, metric])
+  @@index([tenantId, recintoId])
+  @@index([dispositivoId])
+  @@index([status])
+}
+
+//////////////////////////////////////////////////////
+// ALARMAS / COMANDOS / PUSH
+//////////////////////////////////////////////////////
+
 model Alarma {
-  id          Int             @id @default(autoincrement())
-  estacionId  Int
+  id            Int     @id @default(autoincrement())
+  tenantId      Int?
+  recintoId     Int?
+  estacionId    Int
+  dispositivoId Int?
+  sensorId      Int?
+  registroId    String?
+
   tipo        String
   severidad   SeveridadAlarma
   mensaje     String
@@ -211,11 +370,23 @@ model Alarma {
   fechaInicio DateTime        @default(now())
   fechaCierre DateTime?
 
-  estacion Estacion @relation(fields: [estacionId], references: [id])
+  tenant      Tenant?        @relation(fields: [tenantId], references: [id])
+  recinto     Recinto?       @relation(fields: [recintoId], references: [id])
+  estacion    Estacion       @relation(fields: [estacionId], references: [id])
+  dispositivo Dispositivo?   @relation(fields: [dispositivoId], references: [id])
+  sensor      SensorScada?   @relation(fields: [sensorId], references: [id])
+  registro    RegistroScada? @relation(fields: [registroId], references: [id])
+
+  @@index([tenantId, estado])
+  @@index([estacionId, estado])
+  @@index([sensorId, estado])
 }
 
 model Comando {
   id             Int           @id @default(autoincrement())
+  tenantId       Int?
+  recintoId      Int?
+  estacionId     Int?
   dispositivoId  Int
   usuarioId      Int
   tipo           TipoComando
@@ -225,8 +396,15 @@ model Comando {
   fechaSolicitud DateTime      @default(now())
   fechaRespuesta DateTime?
 
+  tenant      Tenant?     @relation(fields: [tenantId], references: [id])
+  recinto     Recinto?    @relation(fields: [recintoId], references: [id])
+  estacion    Estacion?   @relation(fields: [estacionId], references: [id])
   dispositivo Dispositivo @relation(fields: [dispositivoId], references: [id])
   usuario     Usuario     @relation(fields: [usuarioId], references: [id])
+
+  @@index([tenantId, estado])
+  @@index([dispositivoId, estado])
+  @@index([usuarioId])
 }
 
 model DispositivoMovil {
@@ -239,6 +417,8 @@ model DispositivoMovil {
   updatedAt  DateTime   @updatedAt
 
   usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@index([usuarioId, activo])
 }
 
 model Plan {
@@ -270,4 +450,7 @@ model HistorialTenant {
   usuario   Usuario? @relation(fields: [usuarioId], references: [id])
   planAntes Plan?    @relation("PlanAntes", fields: [planAntesId], references: [id])
   planNuevo Plan?    @relation("PlanNuevo", fields: [planNuevoId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([usuarioId])
 }

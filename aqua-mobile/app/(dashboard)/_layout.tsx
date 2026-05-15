@@ -10,8 +10,8 @@ export default function DashboardLayout() {
             }}
         >
             <Stack.Screen name="home" />
-            <Stack.Screen name="users" options={{ headerShown: true, title: 'Gestión de Usuarios', headerStyle: { backgroundColor: '#0f172a' }, headerTintColor: '#fff' }} />
-            <Stack.Screen name="reports" options={{ headerShown: true, title: 'Reportes y Estadísticas', headerStyle: { backgroundColor: '#0f172a' }, headerTintColor: '#fff' }} />
+            <Stack.Screen name="users" options={{ headerShown: false }} />
+            <Stack.Screen name="reports" options={{ headerShown: false }} />
         </Stack>
     );
 }

@@ -1,145 +1,159 @@
+// c:\dev\aqua\backend\src\modules\iot\iot.service.ts
+
 import { EventHubConsumerClient } from "@azure/event-hubs";
+import { ingestTelemetry } from '../../functions/src/telemetry/telemetryIngestor';
 import prisma from "../../lib/prisma";
 
-// ============================================================================
-// 1. EL NÚCLEO (CORE) - Guarda en la base de datos columna por columna
-// ============================================================================
-const procesarDatoTelemetria = async (datosDelSensor: any, io: any) => {
-    if (datosDelSensor.messageType !== "telemetry") return;
+// --- 1. PROCESADOR CENTRAL (POSTGRES + SOCKET.IO) ---
 
+export const processIncomingHubMessages = async (messages: any[], io?: any) => {
     try {
-        // Buscamos el Tenant por su código (ej. APR_SAN_ISIDRO)
-        const tenantExiste = await prisma.tenant.findUnique({
-            where: { nombre: datosDelSensor.tenantCode }
+        const readings = ingestTelemetry(messages);
+        if (readings.length === 0) return;
+
+        const tenantCodes = [...new Set(readings.map(r => r.tenant_id))];
+        const tenants = await prisma.tenant.findMany({
+            where: { nombre: { in: tenantCodes } },
+            select: { id: true, nombre: true }
         });
 
-        if (!tenantExiste) {
-            console.warn(`⚠️ Omitiendo: Tenant '${datosDelSensor.tenantCode}' no existe en BD.`);
-            return;
+        const tenantMap = new Map(tenants.map(t => [t.nombre, t.id]));
+
+        // Guardamos en RegistroScada
+        await prisma.registroScada.createMany({
+            data: readings.map(r => {
+                const tenantId = tenantMap.get(r.tenant_id);
+                if (!tenantId) return null;
+                return {
+                    externalMessageId: r.id,
+                    tenantId: tenantId,
+                    tenantCode: r.tenant_id,
+                    siteCode: r.site_id,
+                    deviceCode: r.device_id,
+                    sensorCode: r.sensor_id,
+                    metric: r.metric,
+                    unit: r.unit,
+                    valueFloat: r.value,
+                    capturedAt: new Date(r.captured_at),
+                    rawPayload: r as any
+                };
+            }).filter(Boolean) as any[],
+            skipDuplicates: true
+        });
+
+        // Ensamblamos un objeto por Tenant con la estructura que espera el frontend
+        if (io) {
+            const byTenant = new Map<number, any>();
+
+            readings.forEach(r => {
+                const tId = tenantMap.get(r.tenant_id);
+                if (!tId) return;
+
+                if (!byTenant.has(tId)) {
+                    byTenant.set(tId, {
+                        fechaLectura: r.captured_at,
+                        nivelEstanquePorcentaje: 0,
+                        volumenEstanqueLitros: 0,
+                        bomba1Activa: false
+                    });
+                }
+
+                const obj = byTenant.get(tId);
+                if (r.metric === 'level')  obj.nivelEstanquePorcentaje  = r.value;
+                if (r.metric === 'volume') obj.volumenEstanqueLitros     = r.value;
+                if (r.metric === 'status') obj.bomba1Activa              = r.value === 1;
+            });
+
+            // Emitimos un solo objeto por Tenant con el nombre que reports.tsx ya escucha
+            byTenant.forEach((payload, tId) => {
+                io.to(`tenant_${tId}`).emit('actualizacion_sensores', payload);
+            });
         }
 
-        // Guardamos todo mapeado a sus columnas individuales
-        const nuevoRegistro = await prisma.telemetria.create({
-            data: {
-                tenantId: tenantExiste.id,
-                siteCode: datosDelSensor.siteCode,
-                gatewayCode: datosDelSensor.gatewayCode,
-                plcCode: datosDelSensor.plcCode,
-                secuencia: datosDelSensor.sequence,
-
-                nivelEstanquePorcentaje: datosDelSensor.process.tankLevelPercent,
-                nivelEstanqueMetros: datosDelSensor.process.tankLevelMeters,
-                volumenEstanqueLitros: datosDelSensor.process.tankVolumeLiters,
-                bomba1Activa: datosDelSensor.process.pump1Running,
-                bomba2Activa: datosDelSensor.process.pump2Running,
-                booster1Activo: datosDelSensor.process.booster1Running,
-                booster2Activo: datosDelSensor.process.booster2Running,
-                valvulaEntradaAbierta: datosDelSensor.process.inletValveOpen,
-                valvulaSalidaAbierta: datosDelSensor.process.outletValveOpen,
-                modoOperacion: datosDelSensor.process.mode,
-                controlRemotoHabilitado: datosDelSensor.process.remoteControlEnabled,
-
-                plcEnLinea: datosDelSensor.communications.plcOnline,
-                nubeConectada: datosDelSensor.communications.cloudConnected,
-                tipoWan: datosDelSensor.communications.wanType,
-                latenciaMs: datosDelSensor.communications.latencyMs,
-
-                fechaLectura: new Date(datosDelSensor.timestampUtc)
+        // Log detallado de cada registro insertado
+        console.log(`\n🚀 [${new Date().toLocaleTimeString()}] ${readings.length} métricas procesadas:`);
+        readings.forEach(r => {
+            const tId = tenantMap.get(r.tenant_id);
+            if (tId) {
+                console.log(`  ✅ [${r.tenant_id}] sensor=${r.sensor_id} metric=${r.metric} value=${r.value} ${r.unit} @ ${r.captured_at}`);
+            } else {
+                console.warn(`  ⚠️  [${r.tenant_id}] Tenant no encontrado en DB — omitido`);
             }
         });
-
-        // Emitimos al Frontend para que se muevan las animaciones en vivo
-        io.to(`tenant_${tenantExiste.id}`).emit('actualizacion_sensores', nuevoRegistro);
 
     } catch (error) {
-        console.error("❌ Error guardando telemetría en BD:", error);
+        console.error("❌ Error en procesamiento IoT:", error);
     }
 };
 
-// ============================================================================
-// 2. EL SIMULADOR COHERENTE PARA 3 COMUNIDADES
-// ============================================================================
-// Variables de estado para que el simulador tenga memoria y sea realista
-const estadoComunidades = [
-    { tenantCode: "APR_SAN_ISIDRO", nivel: 65, capMaxLitros: 500000, alturaMaxMetros: 5.0, llenando: true },
-    { tenantCode: "APR_LOS_ROMEROS", nivel: 30, capMaxLitros: 250000, alturaMaxMetros: 3.5, llenando: false },
-    { tenantCode: "APR_VALLE_HERMOSO", nivel: 85, capMaxLitros: 100000, alturaMaxMetros: 4.0, llenando: true }
+// --- 2. SIMULADOR MULTI-COMUNIDAD (CADA 60 SEG) ---
+
+const comunidades = [
+    { code: "APR_SAN_ISIDRO", nivel: 75, bomba: false, flow: 12.5 },
+    { code: "APR_LOS_ROMEROS", nivel: 40, bomba: true, flow: 45.2 },
+    { code: "APR_VALLE_HERMOSO", nivel: 15, bomba: true, flow: 50.0 }
 ];
 
-let sequenceCounter = 1000;
-
 const iniciarSimuladorIoT = (io: any) => {
-    console.log("🤖 Simulador IoT Multi-Comunidad Iniciado. Generando datos realistas...");
+    console.log("🤖 MODO SIMULACIÓN: Generando datos realistas para 3 comunidades...");
 
-    setInterval(() => {
-        estadoComunidades.forEach(comunidad => {
-            // LÓGICA FÍSICA: Si está llenando, el nivel sube un poco (ej. +1.5%). Si no, baja por el consumo de la gente (ej. -0.8%)
-            if (comunidad.llenando) {
-                comunidad.nivel += (Math.random() * 1.5 + 0.5);
-            } else {
-                comunidad.nivel -= (Math.random() * 1.0 + 0.2);
-            }
+    setInterval(async () => {
+        const batch: any[] = [];
 
-            // LÍMITES: Que no pase de 100 ni baje de 0
-            if (comunidad.nivel >= 98) comunidad.llenando = false; // Se llenó, apagamos la bomba
-            if (comunidad.nivel <= 20) comunidad.llenando = true;  // Nivel crítico, encendemos la bomba
+        comunidades.forEach(c => {
+            // Lógica de simulación física
+            if (c.bomba) c.nivel += 1.5; else c.nivel -= 0.5;
+            if (c.nivel >= 95) c.bomba = false;
+            if (c.nivel <= 15) c.bomba = true;
 
-            // CALCULO MATEMÁTICO REALISTA BASADO EN EL PORCENTAJE
-            const currentMeters = (comunidad.nivel / 100) * comunidad.alturaMaxMetros;
-            const currentLiters = (comunidad.nivel / 100) * comunidad.capMaxLitros;
+            const ts = Date.now();
+            const common = { tenant_id: c.code, site_id: "Sede_Principal", device_id: "GW-MOCK-01", timestamp: new Date(ts).toISOString() };
+            const volumenCalculado = (c.nivel / 100) * 500000;
 
-            // ARMADO DEL JSON EXACTO QUE ESPERAS
-            const payloadSimulado = {
-                messageType: "telemetry",
-                tenantCode: comunidad.tenantCode,
-                siteCode: "RECINTO_01",
-                gatewayCode: `GW-${comunidad.tenantCode.split('_')[1]}`, // Ej: GW-SAN
-                plcCode: "PLC-01",
-                timestampUtc: new Date().toISOString(),
-                sequence: sequenceCounter++,
-                process: {
-                    tankLevelPercent: parseFloat(comunidad.nivel.toFixed(2)),
-                    tankLevelMeters: parseFloat(currentMeters.toFixed(2)),
-                    tankVolumeLiters: Math.floor(currentLiters),
-                    pump1Running: comunidad.llenando, // La bomba está activa si el estanque se está llenando
-                    pump2Running: false,
-                    booster1Running: true, // Asumimos que un presurizador está mandando agua al pueblo siempre
-                    booster2Running: false,
-                    inletValveOpen: comunidad.llenando,
-                    outletValveOpen: true,
-                    mode: "AUTO",
-                    remoteControlEnabled: true
-                },
-                communications: {
-                    plcOnline: true,
-                    cloudConnected: true,
-                    wanType: "STARLINK",
-                    latencyMs: Math.floor(Math.random() * (120 - 40 + 1) + 40) // Latencia fluctuando entre 40 y 120ms
-                }
-            };
+            batch.push(
+                { ...common, id: `mock-${c.code}-TNK_01-${ts}`, sensor_id: "TNK_01", metric: "level",  unit: "%",     value: parseFloat(c.nivel.toFixed(2)) },
+                { ...common, id: `mock-${c.code}-VOL_01-${ts}`, sensor_id: "VOL_01", metric: "volume", unit: "L",     value: Math.floor(volumenCalculado) },
+                { ...common, id: `mock-${c.code}-FLW_01-${ts}`, sensor_id: "FLW_01", metric: "flow",   unit: "m3/h",  value: c.bomba ? c.flow : 0 },
+                { ...common, id: `mock-${c.code}-PMP_01-${ts}`, sensor_id: "PMP_01", metric: "status", unit: "bool",  value: c.bomba ? 1 : 0 }
+            );
 
-            // Enviar al core para guardar
-            procesarDatoTelemetria(payloadSimulado, io);
         });
 
-    }, 5000); // Genera datos cada 5 segundos
+        await processIncomingHubMessages(batch, io);
+    }, 60000); // 60 segundos
 };
 
-// ============================================================================
-// 3. EL DIRECTOR (INICIA EL MODO CORRECTO SEGÚN .ENV)
-// ============================================================================
+// --- 3. CONECTOR AZURE (PRODUCCIÓN) ---
+
+const iniciarAzureIoT = (io: any) => {
+    const connectionString = process.env.IOT_HUB_EVENT_HUB_CONNECTION_STRING;
+    if (!connectionString) return console.error("❌ Error: Falta IOT_HUB_EVENT_HUB_CONNECTION_STRING");
+
+    const consumerClient = new EventHubConsumerClient("$Default", connectionString);
+    console.log("📡 MODO PRODUCCIÓN: Conectado a Azure IoT Hub...");
+
+    consumerClient.subscribe({
+        processEvents: async (events) => {
+            const messages = events.map(e => e.body);
+            await processIncomingHubMessages(messages, io);
+        },
+        processError: async (err) => console.error("❌ Error EventHub:", err)
+    });
+};
+
+// --- 4. DIRECTOR DE SERVICIO ---
+
 export const iniciarServicioIoT = (io: any) => {
-    const mockMode = process.env.USE_MOCK_IOT;
+    const mode = process.env.USE_MOCK_IOT;
 
-    if (mockMode === 'null') {
-        console.log("⏸️ Modo IoT en 'null'. Sistema pausado.");
-        return;
+    switch (mode) {
+        case "true":
+            iniciarSimuladorIoT(io);
+            break;
+        case "false":
+            iniciarAzureIoT(io);
+            break;
+        default:
+            console.log("⏸️ MODO PAUSA: El backend no está recibiendo métricas (USE_MOCK_IOT='null').");
     }
-
-    if (mockMode === 'true') {
-        iniciarSimuladorIoT(io);
-        return;
-    }
-
-    // LÓGICA DE PRODUCCIÓN AZURE (Oculta por simplicidad en esta respuesta, pero es la misma que ya tenías)
 };

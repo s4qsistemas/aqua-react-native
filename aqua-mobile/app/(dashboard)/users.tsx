@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { apiFetch } from '../../src/services/api';
 
 export default function UsersScreen() {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
+    const router = useRouter();
 
     useEffect(() => {
         fetchUsers();
@@ -54,7 +56,12 @@ export default function UsersScreen() {
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <Text style={styles.title}>Usuarios Registrados</Text>
+                <View style={styles.headerLeft}>
+                    <TouchableOpacity onPress={() => router.replace('/(dashboard)/home')} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={22} color="#38bdf8" />
+                    </TouchableOpacity>
+                    <Text style={styles.title}>Usuarios Registrados</Text>
+                </View>
                 <TouchableOpacity style={styles.addButton}>
                     <Ionicons name="add" size={24} color="white" />
                 </TouchableOpacity>
@@ -71,11 +78,13 @@ export default function UsersScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#0f172a', padding: 20 },
-    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-    title: { color: 'white', fontSize: 24, fontWeight: 'bold' },
-    addButton: { backgroundColor: '#38bdf8', padding: 10, borderRadius: 12 },
+    container:  { flex: 1, backgroundColor: '#0f172a', padding: 20 },
+    centered:   { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a' },
+    header:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+    headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+    backBtn:    { padding: 6, borderRadius: 10, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' },
+    title:      { color: 'white', fontSize: 24, fontWeight: 'bold' },
+    addButton:  { backgroundColor: '#38bdf8', padding: 10, borderRadius: 12 },
     list: { gap: 16 },
     userCard: { backgroundColor: '#1e293b', padding: 16, borderRadius: 20, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
     userIcon: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#334155', justifyContent: 'center', alignItems: 'center', marginRight: 16 },

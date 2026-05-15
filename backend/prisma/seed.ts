@@ -1,4 +1,13 @@
-import { Rol, Estado, TipoPlan, TipoHistorialTenant } from "@prisma/client";
+import {
+  Rol,
+  Estado,
+  TipoPlan,
+  TipoHistorialTenant,
+  TipoEstacion,
+  TipoDispositivo,
+  EstadoDispositivo,
+  TipoSensorScada,
+} from "@prisma/client";
 import bcrypt from "bcryptjs";
 import prisma from "../src/lib/prisma";
 
@@ -16,67 +25,72 @@ async function main() {
   for (const p of planes) {
     await prisma.plan.upsert({
       where: { nombre: p.nombre },
-      update: {},
+      update: { descripcion: p.descripcion },
       create: p,
     });
   }
 
-  // Buscamos el plan Básico para asignárselo a los nuevos tenants por defecto
-  const planBasico = await prisma.plan.findUnique({ where: { nombre: TipoPlan.BASICO } });
+  const planBasico = await prisma.plan.findUnique({
+    where: { nombre: TipoPlan.BASICO },
+  });
 
-  // 2. Crear las Comunidades (Tenants) para el Simulador IoT
+  if (!planBasico) {
+    throw new Error("No se pudo crear/encontrar el plan BASICO.");
+  }
+
+  // 2. Crear las Comunidades (Tenants)
   console.log("Creando comunidades (Tenants)...");
   const comunidades = ["APR_SAN_ISIDRO", "APR_LOS_ROMEROS", "APR_VALLE_HERMOSO"];
 
-  // Guardaremos los IDs generados en un diccionario para asignarlos a los usuarios más abajo
   const tenantIds: Record<string, number> = {};
 
   for (const nombre of comunidades) {
-    let tenant = await prisma.tenant.findUnique({ where: { nombre: nombre } });
+    let tenant = await prisma.tenant.findUnique({ where: { nombre } });
 
     if (!tenant) {
       tenant = await prisma.tenant.create({
         data: {
-          nombre: nombre,
+          nombre,
           estado: Estado.ACTIVO,
-          planId: planBasico?.id,
+          planId: planBasico.id,
         },
       });
 
-      // Registro de auditoría para la creación y asignación de plan
       await prisma.historialTenant.create({
         data: {
           tenantId: tenant.id,
           tipo: TipoHistorialTenant.ACTIVACION,
           estadoNuevo: Estado.ACTIVO,
-          planNuevoId: planBasico?.id,
+          planNuevoId: planBasico.id,
           nota: "Comunidad creada y activada por el sistema (Seed) con plan Básico inicial.",
         },
       });
     }
+
     tenantIds[nombre] = tenant.id;
   }
 
-  // Generar hash de contraseña único para todos ("admin123")
+  // 3. Crear usuarios base
   const salt = await bcrypt.genSalt(10);
   const passwordHash = await bcrypt.hash("admin123", salt);
 
-  // 3. Crear Superadmin (Global)
   console.log("Creando usuario Superadmin global...");
   await prisma.usuario.upsert({
     where: { email: "sadmin@aqua.cl" },
-    update: { tenantId: null },
+    update: {
+      tenantId: null,
+      rol: Rol.SUPERADMIN,
+      estado: Estado.ACTIVO,
+    },
     create: {
       email: "sadmin@aqua.cl",
       nombre: "Administrador Sistema",
-      passwordHash: passwordHash,
+      passwordHash,
       rol: Rol.SUPERADMIN,
       estado: Estado.ACTIVO,
-      // tenantId es null porque tiene acceso a todo
     },
   });
 
-  // 4. Crear Administradores por Comunidad
   console.log("Creando usuarios Administradores para cada comunidad...");
   const admins = [
     { email: "admin@sanisidro.cl", nombre: "Admin San Isidro", tenantNombre: "APR_SAN_ISIDRO" },
@@ -92,14 +106,13 @@ async function main() {
         data: {
           email: admin.email,
           nombre: admin.nombre,
-          passwordHash: passwordHash,
+          passwordHash,
           rol: Rol.ADMIN,
           estado: Estado.ACTIVO,
           tenantId: tenantIds[admin.tenantNombre],
         },
       });
 
-      // Registro de auditoría para el administrador
       await prisma.historialTenant.create({
         data: {
           tenantId: tenantIds[admin.tenantNombre],
@@ -109,15 +122,94 @@ async function main() {
         },
       });
     } else {
-      // Si ya existe, nos aseguramos de que pertenezca a su comunidad correcta
       await prisma.usuario.update({
         where: { id: usuario.id },
-        data: { tenantId: tenantIds[admin.tenantNombre] },
+        data: {
+          tenantId: tenantIds[admin.tenantNombre],
+          rol: Rol.ADMIN,
+          estado: Estado.ACTIVO,
+        },
       });
     }
   }
 
+  // 4. Crear estructura SCADA para las 3 comunidades del simulador
+  console.log("Configurando infraestructuras SCADA para las 3 comunidades...");
+
+  for (const nombre of comunidades) {
+    const tId = tenantIds[nombre];
+
+    // Crear Recinto Principal (Coincide con site_id: "Sede_Principal" del simulador)
+    const recinto = await prisma.recinto.upsert({
+      where: { tenantId_codigo: { tenantId: tId, codigo: "Sede_Principal" } },
+      update: { nombre: "Sede Central", estado: Estado.ACTIVO },
+      create: {
+        tenantId: tId,
+        codigo: "Sede_Principal",
+        nombre: "Sede Central",
+        ubicacion: `Sector matriz de ${nombre}`,
+        estado: Estado.ACTIVO,
+      },
+    });
+
+    // Crear Estación de Prueba
+    const estacion = await prisma.estacion.upsert({
+      where: { recintoId_codigo: { recintoId: recinto.id, codigo: "ESTACION_01" } },
+      update: { nombre: "Estación de Monitoreo 01" },
+      create: {
+        recintoId: recinto.id,
+        codigo: "ESTACION_01",
+        nombre: "Estación de Monitoreo 01",
+        tipo: TipoEstacion.ESTANQUE,
+        estado: Estado.ACTIVO,
+      },
+    });
+
+    // Crear PLC (Coincide con device_id: "GW-MOCK-01" del simulador)
+    const plc = await prisma.dispositivo.upsert({
+      where: { estacionId_codigo: { estacionId: estacion.id, codigo: "GW-MOCK-01" } },
+      update: { estado: EstadoDispositivo.CONECTADO, ultimaConexion: new Date() },
+      create: {
+        estacionId: estacion.id,
+        codigo: "GW-MOCK-01",
+        nombre: "PLC Integrado",
+        tipo: TipoDispositivo.PLC,
+        estado: EstadoDispositivo.CONECTADO,
+      },
+    });
+
+    // Crear los 4 sensores que el simulador va a alimentar
+    const sensores = [
+      { codigo: "TNK_01", nombre: "Nivel Estanque", metric: "level", unit: "%", tipo: TipoSensorScada.NIVEL },
+      { codigo: "FLW_01", nombre: "Caudalímetro", metric: "flow", unit: "m3/h", tipo: TipoSensorScada.CAUDAL },
+      { codigo: "PMP_01", nombre: "Estado Bomba", metric: "status", unit: "bool", tipo: TipoSensorScada.ESTADO },
+      { codigo: "NET_01", nombre: "Latencia de Red", metric: "latency", unit: "ms", tipo: TipoSensorScada.OTRO },
+    ];
+
+    for (const s of sensores) {
+      await prisma.sensorScada.upsert({
+        where: { dispositivoId_codigo: { dispositivoId: plc.id, codigo: s.codigo } },
+        update: { metric: s.metric, unit: s.unit },
+        create: {
+          tenantId: tId,
+          recintoId: recinto.id,
+          estacionId: estacion.id,
+          dispositivoId: plc.id,
+          codigo: s.codigo,
+          nombre: s.nombre,
+          metric: s.metric,
+          unit: s.unit,
+          tipo: s.tipo,
+        },
+      });
+    }
+  }
+
+
   console.log("✅ Seeding completado con éxito. Todo listo para las pruebas.");
+  console.log("Usuarios base:");
+  console.log("  SUPERADMIN: sadmin@aqua.cl / admin123");
+  console.log("  ADMIN APR_SAN_ISIDRO: admin@sanisidro.cl / admin123");
 }
 
 main()

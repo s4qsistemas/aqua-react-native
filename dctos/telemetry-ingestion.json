@@ -1,0 +1,12 @@
+{
+    "id": "tlm-uuid",
+    "tenant_id": "tenant-abc",
+    "site_id": "site-001",
+    "device_id": "gw-001",
+    "sensor_id": "sensor-001",
+    "metric": "flow",
+    "unit": "bar",
+    "value": 2.34,
+    "timestamp": "2026-05-08T14:55:00Z",
+    "ingested_at": "2026-05-08T14:55:02Z"
+}

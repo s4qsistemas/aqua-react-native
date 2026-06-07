@@ -3,7 +3,10 @@
 docker exec -it aqua-postgres psql -U postgres -d aqua_db
 docker exec -it aqua-postgres psql -U postgres -d aqua_db
 
+docker exec -i aqua-postgres psql -U postgres -d aqua_db -c "\copy \"RegistroScada\" TO STDOUT WITH CSV HEADER" > RegistroScada.csv
+
 aqua_db=# \d
+aqua_db=# \d "RegistroScada"
 aqua_db=# \q
 
 aqua_db=# select * from "Tenant";

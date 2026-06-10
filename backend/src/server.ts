@@ -21,7 +21,8 @@ io.on("connection", (socket) => {
     socket.on("unirse_tenant", (tenantId) => {
         const room = `tenant_${tenantId}`;
         socket.join(room);
-        console.log(`🔌 Cliente ${socket.id} se unió a la sala ${room}`);
+        console.log(`✅ Cliente ${socket.id} se unió a la sala: ${room}`);
+        console.log(`📊 Salas activas en socket: ${JSON.stringify(socket.rooms)}`);
     });
 
     socket.on("disconnect", () => {

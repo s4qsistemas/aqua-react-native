@@ -7,7 +7,6 @@ import { useAuth } from '../../src/context/AuthContext';
 import { apiFetch } from '../../src/services/api';
 import { LineChart } from 'react-native-chart-kit';
 
-// ── Opciones de filtro de tiempo ─────────────────────────────────────────────
 const FILTROS_TIEMPO = [
     { label: '1h',  horas: 1 },
     { label: '6h',  horas: 6 },
@@ -16,34 +15,31 @@ const FILTROS_TIEMPO = [
     { label: '30d', horas: 720 },
 ];
 
-// ── Opciones de métrica ───────────────────────────────────────────────────────
 const METRICAS = [
-    { label: 'Nivel',   metric: 'level',  campo: 'nivelEstanquePorcentaje', sufijo: '%',  color: 'rgba(56, 189, 248,' },
-    { label: 'Volumen', metric: 'volume', campo: 'volumenEstanqueLitros',   sufijo: 'L',  color: 'rgba(16, 185, 129,' },
-    { label: 'Flujo',   metric: 'flow',   campo: 'caudalLps',               sufijo: 'm³', color: 'rgba(251, 191, 36,' },
+    { label: 'Nivel',   metric: 'level',  campo: 'nivelEstanquePorcentaje', sufijo: '%',    color: 'rgba(56, 189, 248,' },
+    { label: 'Volumen', metric: 'volume', campo: 'volumenEstanqueLitros',   sufijo: ' L',   color: 'rgba(16, 185, 129,' },
+    { label: 'Flujo',   metric: 'flow',   campo: 'caudalLps',               sufijo: ' m³/h',color: 'rgba(251, 191, 36,' },
 ];
 
 export default function ReportsScreen() {
     const { user } = useAuth();
-    const router   = useRouter();
-
-    const handleBack = () => router.replace('/(dashboard)/home');
+    const router = useRouter();
 
     const socketRef = useRef<Socket | null>(null);
 
     const [telemetria, setTelemetria] = useState<any>(null);
-    const [lastSync, setLastSync]     = useState<Date | null>(null);
-    const [historial, setHistorial]     = useState<any[]>([]);
-    const [cargandoInicial, setCargandoInicial] = useState(true);  // Solo en el primer load
-    const [cargandoFiltro, setCargandoFiltro]   = useState(false); // Overlay sutil al cambiar filtros
-
-    const [filtroHoras,  setFiltroHoras]  = useState(24);
+    const [lastSync, setLastSync] = useState<Date | null>(null);
+    const [historial, setHistorial] = useState<any[]>([]);
+    
+    const [cargandoInicial, setCargandoInicial] = useState(true);
+    const [cargandoFiltro, setCargandoFiltro] = useState(false);
+    const [filtroHoras, setFiltroHoras] = useState(24);
     const [filtroMetric, setFiltroMetric] = useState(METRICAS[0]);
 
-    // ── Carga del historial (re-ejecuta al cambiar filtros) ───────────────────
+    const [chartContainerWidth, setChartContainerWidth] = useState(Dimensions.get('window').width - 40);
+
     const cargarHistorial = useCallback(async (horas: number, metricObj: typeof METRICAS[0], esFiltro = false) => {
         if (!user?.tenantId) return;
-        // Si ya tenemos datos, usamos overlay sutil para no destruir el gráfico
         if (esFiltro) setCargandoFiltro(true);
         else setCargandoInicial(true);
         try {
@@ -63,7 +59,6 @@ export default function ReportsScreen() {
         }
     }, [user?.tenantId]);
 
-    // ── Carga inicial + cambio de filtros ─────────────────────────────────────
     const isFirstLoad = useRef(true);
     useEffect(() => {
         const esFiltro = !isFirstLoad.current;
@@ -71,31 +66,51 @@ export default function ReportsScreen() {
         cargarHistorial(filtroHoras, filtroMetric, esFiltro);
     }, [filtroHoras, filtroMetric, cargarHistorial]);
 
-    // ── WebSocket (se monta una sola vez) ─────────────────────────────────────
     useEffect(() => {
-        if (!user?.tenantId) return;
+        if (!user?.tenantId) {
+            console.warn('⚠️ tenantId no disponible:', user);
+            return;
+        }
 
-        const socketUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.replace('/api', '') || 'http://192.168.1.16:3000';
-        const socket = io(socketUrl);
+        console.log('🔗 Iniciando conexión WebSocket...');
+        console.log('👤 Usuario tenantId:', user.tenantId, 'Tipo:', typeof user.tenantId);
+
+        const socketUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.replace('/api', '') || 'http://192.168.1.20:3000';
+        console.log('🌐 Socket URL:', socketUrl);
+        
+        const socket = io(socketUrl, {
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: 5
+        });
         socketRef.current = socket;
 
         socket.on('connect', () => {
-            console.log('📡 WebSocket conectado en pantalla de Reportes');
+            console.log('✅ WebSocket conectado, ID:', socket.id);
+            console.log(`📤 Emitiendo unirse_tenant con ID: ${user.tenantId}`);
             socket.emit('unirse_tenant', user.tenantId);
         });
 
+        socket.on('connect_error', (err: any) => {
+            console.error('❌ Error de conexión WebSocket:', err);
+        });
+
         socket.on('actualizacion_sensores', (data: any) => {
-            console.log('💧 Nuevo dato recibido:', data);
+            console.log('✨ DATO RECIBIDO POR WEBSOCKET:', data);
             setTelemetria(data);
             setLastSync(new Date());
-            // Solo añadimos al historial si el filtro activo es 1h o 24h (datos recientes)
             setHistorial(prev => [...prev, data].slice(-500));
         });
 
-        return () => { socket.disconnect(); };
+        return () => {
+            console.log('🔌 Desconectando WebSocket');
+            socket.disconnect();
+        };
     }, [user?.tenantId]);
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    const handleBack = () => router.replace('/(dashboard)/home');
+
     const getSyncText = () => {
         if (cargandoInicial) return 'Cargando...';
         if (!lastSync) return 'Esperando conexión...';
@@ -104,7 +119,7 @@ export default function ReportsScreen() {
     };
 
     const chartValues = historial.map(h => Number(h[filtroMetric.campo] ?? h.nivelEstanquePorcentaje ?? 0));
-
+    
     const chartData = {
         labels: chartValues.map(() => ''),
         datasets: [{
@@ -118,11 +133,9 @@ export default function ReportsScreen() {
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-
-            {/* Header con botón Volver siempre visible */}
             <View style={styles.header}>
                 <View style={styles.headerLeft}>
-                    <TouchableOpacity onPress={handleBack} style={styles.backBtn} accessibilityLabel="Volver">
+                    <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
                         <Ionicons name="arrow-back" size={22} color="#38bdf8" />
                     </TouchableOpacity>
                     <View>
@@ -136,20 +149,14 @@ export default function ReportsScreen() {
                 </View>
             </View>
 
-            {/* Resumen Principal */}
             <View style={styles.summaryCard}>
                 <Text style={styles.summaryLabel}>Volumen Actual</Text>
                 <Text style={styles.summaryValue}>
                     {telemetria?.volumenEstanqueLitros?.toLocaleString() ?? '0'}
                     <Text style={styles.unit}> L</Text>
                 </Text>
-                <View style={styles.trendRow}>
-                    <Ionicons name="trending-up" size={20} color="#10b981" />
-                    <Text style={styles.trendText}>+2.4% vs hora anterior</Text>
-                </View>
             </View>
 
-            {/* KPIs */}
             <View style={styles.grid}>
                 <View style={styles.statCard}>
                     <Ionicons name="water" size={24} color="#38bdf8" />
@@ -163,12 +170,10 @@ export default function ReportsScreen() {
                 </View>
             </View>
 
-            {/* ── Sección de Gráfico ──────────────────────────────────────── */}
             <View style={styles.chartHeader}>
                 <Text style={styles.sectionTitle}>Nivel Histórico ({filtroLabel})</Text>
             </View>
 
-            {/* Selector de Métrica */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
                 {METRICAS.map(m => (
                     <TouchableOpacity
@@ -183,7 +188,6 @@ export default function ReportsScreen() {
                 ))}
             </ScrollView>
 
-            {/* Selector de Tiempo */}
             <View style={styles.timeFilterRow}>
                 {FILTROS_TIEMPO.map(f => (
                     <TouchableOpacity
@@ -198,16 +202,21 @@ export default function ReportsScreen() {
                 ))}
             </View>
 
-            {/* Gráfico — nunca se desmonta si ya tiene datos */}
             <View style={chartValues.length > 0 && !cargandoInicial ? styles.chartContainer : styles.chartPlaceholder}>
                 {cargandoInicial ? (
-                    // Spinner solo en el primer load (sin datos previos)
                     <ActivityIndicator color="#38bdf8" size="large" />
                 ) : chartValues.length > 0 ? (
-                    <View>
+                    <View
+                        style={{ overflow: 'hidden', width: '100%', alignItems: 'center' }}
+                        onLayout={(event) => {
+                            // Esta función "mide" la caja en tiempo real, ya sea en web o móvil.
+                            const { width } = event.nativeEvent.layout;
+                            setChartContainerWidth(width);
+                        }}
+                    >
                         <LineChart
                             data={chartData}
-                            width={Dimensions.get('window').width - 40}
+                            width={chartContainerWidth}
                             height={220}
                             yAxisSuffix={filtroMetric.sufijo}
                             withVerticalLabels={false}
@@ -225,7 +234,6 @@ export default function ReportsScreen() {
                             bezier
                             style={{ marginVertical: 8, borderRadius: 16 }}
                         />
-                        {/* Overlay sutil mientras se cargan nuevos datos por filtro */}
                         {cargandoFiltro && (
                             <View style={styles.chartOverlay}>
                                 <ActivityIndicator color="#38bdf8" size="small" />
@@ -239,14 +247,13 @@ export default function ReportsScreen() {
                     </>
                 )}
             </View>
-
         </ScrollView>
     );
 }
 
 const styles = StyleSheet.create({
-    container:          { flex: 1, backgroundColor: '#0f172a' },
-    content:            { padding: 20 },
+    container:          { flex: 1, backgroundColor: '#0f172a', minHeight: Dimensions.get('window').height },
+    content:            { padding: 20, paddingBottom: 60 },
     header:             { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
     headerLeft:         { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
     backBtn:            { padding: 6, borderRadius: 10, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' },
@@ -259,8 +266,6 @@ const styles = StyleSheet.create({
     summaryLabel:       { color: '#94a3b8', fontSize: 16, marginBottom: 8 },
     summaryValue:       { color: 'white', fontSize: 36, fontWeight: '900' },
     unit:               { fontSize: 20, color: '#38bdf8' },
-    trendRow:           { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 8 },
-    trendText:          { color: '#10b981', fontSize: 14, fontWeight: '600' },
     grid:               { flexDirection: 'row', gap: 16, marginBottom: 24 },
     statCard:           { flex: 1, backgroundColor: '#1e293b', padding: 20, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
     statValue:          { color: 'white', fontSize: 24, fontWeight: 'bold', marginTop: 8 },
@@ -278,6 +283,6 @@ const styles = StyleSheet.create({
     timeBtnText:        { color: '#64748b', fontSize: 13, fontWeight: '700' },
     timeBtnTextActive:  { color: '#38bdf8' },
     chartPlaceholder:   { height: 200, backgroundColor: '#1e293b', borderRadius: 24, borderWidth: 2, borderColor: '#334155', borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center' },
-    chartContainer:     { backgroundColor: '#1e293b', borderRadius: 24, borderWidth: 1, borderColor: '#334155', paddingVertical: 10, alignItems: 'center' },
+    chartContainer:     { backgroundColor: '#1e293b', borderRadius: 24, borderWidth: 1, borderColor: '#334155', paddingVertical: 10, paddingHorizontal: 0, alignItems: 'center', overflow: 'hidden', width: '100%' },
     chartOverlay:       { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(15,23,42,0.5)', borderRadius: 16 },
 });

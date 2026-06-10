@@ -139,7 +139,7 @@ async function main() {
   for (const nombre of comunidades) {
     const tId = tenantIds[nombre];
 
-    // Crear Recinto Principal (Coincide con site_id: "Sede_Principal" del simulador)
+    // Crear Recinto Principal (Coincide con site_id: "Sede_Principal")
     const recinto = await prisma.recinto.upsert({
       where: { tenantId_codigo: { tenantId: tId, codigo: "Sede_Principal" } },
       update: { nombre: "Sede Central", estado: Estado.ACTIVO },
@@ -152,37 +152,38 @@ async function main() {
       },
     });
 
-    // Crear Estación de Prueba
+    // Crear Estación de Prueba (ALINEADO A "EST_01")
     const estacion = await prisma.estacion.upsert({
-      where: { recintoId_codigo: { recintoId: recinto.id, codigo: "ESTACION_01" } },
+      where: { recintoId_codigo: { recintoId: recinto.id, codigo: "EST_01" } },
       update: { nombre: "Estación de Monitoreo 01" },
       create: {
         recintoId: recinto.id,
-        codigo: "ESTACION_01",
+        codigo: "EST_01",
         nombre: "Estación de Monitoreo 01",
         tipo: TipoEstacion.ESTANQUE,
         estado: Estado.ACTIVO,
       },
     });
 
-    // Crear PLC (Coincide con device_id: "GW-MOCK-01" del simulador)
+    // Crear PLC/Gateway (Coincide con device_id: "GW-MOCK-01")
     const plc = await prisma.dispositivo.upsert({
       where: { estacionId_codigo: { estacionId: estacion.id, codigo: "GW-MOCK-01" } },
       update: { estado: EstadoDispositivo.CONECTADO, ultimaConexion: new Date() },
       create: {
         estacionId: estacion.id,
         codigo: "GW-MOCK-01",
-        nombre: "PLC Integrado",
-        tipo: TipoDispositivo.PLC,
+        nombre: "Gateway Principal",
+        tipo: TipoDispositivo.GATEWAY, // o PLC dependiendo de cómo lo uses en físico
         estado: EstadoDispositivo.CONECTADO,
       },
     });
 
-    // Crear los 4 sensores que el simulador va a alimentar
+    // Crear los sensores EXACTAMENTE alineados al formato del simulador
     const sensores = [
       { codigo: "TNK_01", nombre: "Nivel Estanque", metric: "level", unit: "%", tipo: TipoSensorScada.NIVEL },
-      { codigo: "FLW_01", nombre: "Caudalímetro", metric: "flow", unit: "m3/h", tipo: TipoSensorScada.CAUDAL },
-      { codigo: "PMP_01", nombre: "Estado Bomba", metric: "status", unit: "bool", tipo: TipoSensorScada.ESTADO },
+      { codigo: "VOL_01", nombre: "Volumen Estanque", metric: "volume", unit: "L", tipo: TipoSensorScada.OTRO }, // Agregado el Volumen
+      { codigo: "FLW_01", nombre: "Caudalímetro", metric: "flow", unit: "m³/h", tipo: TipoSensorScada.CAUDAL }, // Unidad estándar
+      { codigo: "PMP_01", nombre: "Estado Bomba Principal", metric: "status", unit: "bool", tipo: TipoSensorScada.ESTADO },
       { codigo: "NET_01", nombre: "Latencia de Red", metric: "latency", unit: "ms", tipo: TipoSensorScada.OTRO },
     ];
 
@@ -204,7 +205,6 @@ async function main() {
       });
     }
   }
-
 
   console.log("✅ Seeding completado con éxito. Todo listo para las pruebas.");
   console.log("Usuarios base:");
